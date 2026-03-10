@@ -13,7 +13,7 @@ CORS(app)
 model = joblib.load("drowsiness_svm.pkl")
 scaler = joblib.load("scaler.pkl")
 
-IMG_SIZE = 32
+IMG_SIZE = 64
 
 face_cascade = cv2.CascadeClassifier(
     cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
