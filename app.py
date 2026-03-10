@@ -6,11 +6,12 @@ import joblib
 import base64
 import os
 import gdown
+import time
 
 app = Flask(__name__)
 CORS(app)
 
-# ================= MODEL PATH =================
+# ================= MODEL =================
 
 MODEL_PATH = "drowsiness_svm.pkl"
 SCALER_PATH = "scaler.pkl"
@@ -19,7 +20,7 @@ MODEL_URL = "https://drive.google.com/uc?id=1qsX30X3c31yEKRRF9GRLCwTUofYTzAfl"
 SCALER_URL = "https://drive.google.com/uc?id=1mX7pdCdBaCLwalMXkmtNvNaE_sPM_-Fr"
 
 
-# ================= DOWNLOAD MODEL =================
+# download model if not exists
 
 if not os.path.exists(MODEL_PATH):
     print("Downloading model...")
@@ -43,10 +44,13 @@ face_cascade = cv2.CascadeClassifier(
 )
 
 
-# ================= SMOOTHING =================
+# ================= STATE =================
 
 closed_counter = 0
-THRESHOLD = 3
+closed_start = None
+
+THRESHOLD = 8
+DROWSY_TIME = 2
 
 
 # ================= ROOT =================
@@ -61,11 +65,10 @@ def home():
 @app.route("/predict", methods=["POST"])
 def predict():
 
-    global closed_counter
+    global closed_counter, closed_start
 
     data = request.json["image"]
 
-    # decode image
     img_bytes = base64.b64decode(data.split(",")[1])
     np_arr = np.frombuffer(img_bytes, np.uint8)
     frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
@@ -89,7 +92,6 @@ def predict():
 
     x, y, w, h = faces[0]
 
-    # crop face
     face = gray[y:y+h, x:x+w]
 
     # normalize brightness
@@ -97,13 +99,12 @@ def predict():
 
     fh, fw = face.shape
 
-    # crop eye region (better crop)
+    # ===== better eye crop =====
     eye_region = face[
-        int(fh*0.15):int(fh*0.55),
-        int(fw*0.1):int(fw*0.9)
+        int(fh*0.18):int(fh*0.42),
+        int(fw*0.2):int(fw*0.8)
     ]
 
-    # resize to training size
     eye_region = cv2.resize(eye_region, (IMG_SIZE, IMG_SIZE))
 
     feature = eye_region.flatten().reshape(1, -1)
@@ -112,21 +113,41 @@ def predict():
 
     prediction = model.predict(feature)[0]
 
-    # ---------- smoothing ----------
+    # ================= SMOOTHING =================
 
     if prediction == 1:
-        closed_counter += 1
-    else:
-        closed_counter = 0
 
-    if closed_counter >= THRESHOLD:
+        closed_counter += 1
+
+        if closed_start is None:
+            closed_start = time.time()
+
+    else:
+
+        closed_counter = 0
+        closed_start = None
+
+
+    # ===== time based detection =====
+
+    if closed_start is not None and time.time() - closed_start > DROWSY_TIME:
+
         status = "Drowsy"
         eye_state = "Closed"
         confidence = 92
+
+    elif closed_counter >= THRESHOLD:
+
+        status = "Drowsy"
+        eye_state = "Closed"
+        confidence = 92
+
     else:
+
         status = "Alert"
         eye_state = "Open"
         confidence = 96
+
 
     return jsonify({
         "status": status,
@@ -135,8 +156,10 @@ def predict():
     })
 
 
-# ================= RENDER RUN =================
+# ================= RENDER =================
 
 if __name__ == "__main__":
+
     port = int(os.environ.get("PORT", 10000))
+
     app.run(host="0.0.0.0", port=port)
