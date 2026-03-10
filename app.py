@@ -6,20 +6,39 @@ import joblib
 import base64
 import time
 import os
+import gdown
 
 app = Flask(__name__)
 CORS(app)
 
-model = joblib.load("drowsiness_svm.pkl")
-scaler = joblib.load("scaler.pkl")
+MODEL_PATH = "drowsiness_svm.pkl"
+SCALER_PATH = "scaler.pkl"
+
+MODEL_URL = "https://drive.google.com/uc?id=1qsX30X3c31yEKRRF9GRLCwTUofYTzAfl"
+SCALER_URL = "https://drive.google.com/uc?id=1mX7pdCdBaCLwalMXkmtNvNaE_sPM_-Fr"
+
+
+# ---------- Download files if not exist ----------
+
+if not os.path.exists(MODEL_PATH):
+    print("Downloading model...")
+    gdown.download(MODEL_URL, MODEL_PATH, quiet=False)
+
+if not os.path.exists(SCALER_PATH):
+    print("Downloading scaler...")
+    gdown.download(SCALER_URL, SCALER_PATH, quiet=False)
+
+
+model = joblib.load(MODEL_PATH)
+scaler = joblib.load(SCALER_PATH)
 
 IMG_SIZE = 64
+
 
 face_cascade = cv2.CascadeClassifier(
     cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 )
 
-# -------- STATE VARIABLES --------
 
 closed_counter = 0
 open_counter = 0
@@ -32,14 +51,10 @@ THRESHOLD = 3
 DROWSY_TIME = 2
 
 
-# -------- ROOT ROUTE (needed for Render) --------
-
 @app.route("/")
 def home():
     return "Backend running"
 
-
-# -------- PREDICT --------
 
 @app.route("/predict", methods=["POST"])
 def predict():
@@ -62,9 +77,7 @@ def predict():
         return jsonify({
             "status": "No Face",
             "confidence": 0,
-            "eye_state": "-",
-            "blink": blink_count,
-            "fatigue": fatigue_score
+            "eye_state": "-"
         })
 
     x, y, w, h = faces[0]
@@ -83,44 +96,7 @@ def predict():
 
     prediction = model.predict(feature)[0]
 
-    # ---------- smoothing ----------
-
     if prediction == 1:
-
-        closed_counter += 1
-        open_counter = 0
-
-        if closed_counter == 1:
-            closed_start_time = time.time()
-
-    else:
-
-        if closed_counter > 0:
-            blink_count += 1
-
-        open_counter += 1
-        closed_counter = 0
-        closed_start_time = None
-
-    if closed_counter >= THRESHOLD:
-        drowsy_state = True
-
-    if open_counter >= THRESHOLD:
-        drowsy_state = False
-
-    # ---------- fatigue ----------
-
-    if closed_start_time is not None:
-
-        elapsed = time.time() - closed_start_time
-
-        if elapsed > DROWSY_TIME:
-            fatigue_score += 1
-            drowsy_state = True
-
-    # ---------- status ----------
-
-    if drowsy_state:
         status = "Drowsy"
         eye_state = "Closed"
         confidence = 92
@@ -132,13 +108,9 @@ def predict():
     return jsonify({
         "status": status,
         "confidence": confidence,
-        "eye_state": eye_state,
-        "blink": blink_count,
-        "fatigue": fatigue_score
+        "eye_state": eye_state
     })
 
-
-# -------- RENDER RUN FIX --------
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
